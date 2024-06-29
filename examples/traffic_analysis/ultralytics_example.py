@@ -106,9 +106,13 @@ class VideoProcessor:
 
         if self.target_video_path:
             with sv.VideoSink(self.target_video_path, self.video_info) as sink:
+                count = 0
                 for frame in tqdm(frame_generator, total=self.video_info.total_frames):
                     annotated_frame = self.process_frame(frame)
                     sink.write_frame(annotated_frame)
+                    count += 1
+                    if count == 25:
+                        break
         else:
             for frame in tqdm(frame_generator, total=self.video_info.total_frames):
                 annotated_frame = self.process_frame(frame)
@@ -127,6 +131,21 @@ class VideoProcessor:
             )
             annotated_frame = sv.draw_polygon(
                 annotated_frame, zone_out.polygon, COLORS.colors[i]
+            )
+            # draw text for zonein and zoneoout
+            zone_in_center = sv.get_polygon_center(polygon=zone_in.polygon)
+            zone_out_center = sv.get_polygon_center(polygon=zone_out.polygon)
+            annotated_frame = sv.draw_text(
+                scene=annotated_frame,
+                text=f"zone_in_center {i}",
+                text_anchor=zone_in_center,
+                background_color=COLORS.colors[i],
+            )
+            annotated_frame = sv.draw_text(
+                scene=annotated_frame,
+                text=f"zone_out_center {i}",
+                text_anchor=zone_out_center,
+                background_color=COLORS.colors[i],
             )
 
         labels = [f"#{tracker_id}" for tracker_id in detections.tracker_id]
