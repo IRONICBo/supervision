@@ -8,6 +8,21 @@ import supervision as sv
 
 COLORS = sv.ColorPalette.from_hex(["#E6194B", "#3CB44B", "#FFE119", "#3C76D1"])
 
+class TrackerInfo:
+    def __init__(self):
+        self.positions = []  # List of (x, y) tuples
+
+    def update_position(self, position):
+        self.positions.append(position)
+
+    def calculate_speed(self):
+        if len(self.positions) > 1:
+            # Calculate the Euclidean distance between the last and the second last positions
+            x1, y1 = self.positions[-2]
+            x2, y2 = self.positions[-1]
+            return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        return 0
+
 class GlobalDetectionsManager:
     def __init__(self) -> None:
         self.global_counts: int = 0
@@ -16,11 +31,14 @@ class GlobalDetectionsManager:
         self.global_counts = len(detections)
 
 class VideoProcessor:
-    def __init__(self, source_weights_path: str, source_video_path: str, target_video_path: str = None, confidence_threshold: float = 0.3, iou_threshold: float = 0.7) -> None:
+    def __init__(self, source_weights_path: str, source_video_path: str, target_video_path: str = None, confidence_threshold: float = 0.3, iou_threshold: float = 0.7, slow_speed_threshold: float = 1.0) -> None:
         self.conf_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
         self.source_video_path = source_video_path
         self.target_video_path = target_video_path
+        self.tracker_infos = {}
+        self.slow_speed_threshold = slow_speed_threshold  # Define a speed threshold for slow moving objects
+
 
         # self.model = YOLO(source_weights_path)
         self.model = YOLO('yolov8l.pt').cuda()
@@ -63,6 +81,7 @@ class VideoProcessor:
 
     def annotate_frame(self, frame: np.ndarray, detections: sv.Detections) -> np.ndarray:
         annotated_frame = self.bounding_box_annotator.annotate(frame.copy(), detections)
+        slow_ids = []
         text_anchor = sv.Point(x=50, y=50)
 
         labels = [f"#{tracker_id}" for tracker_id in detections.tracker_id]
@@ -73,6 +92,26 @@ class VideoProcessor:
         annotated_frame = self.label_annotator.annotate(
             annotated_frame, detections, labels
         )
+        # speed
+        for detection_idx in range(len(detections)):
+            tracker_id = detections.tracker_id[detection_idx]
+            if tracker_id not in self.tracker_infos:
+                self.tracker_infos[tracker_id] = TrackerInfo()
+            x1, y1, x2, y2 = detections.xyxy[detection_idx].astype(int)
+            center = ((x1 + x2) // 2, (y1 + y2) // 2)
+            self.tracker_infos[tracker_id].update_position(center)
+            speed = self.tracker_infos[tracker_id].calculate_speed()
+            if speed < self.slow_speed_threshold:
+                slow_ids.append(tracker_id)
+        if slow_ids:
+            slow_text = f"Slow IDs: {', '.join(map(str, slow_ids))}"
+            annotated_frame = sv.draw_text(
+                scene=annotated_frame,
+                text=slow_text,
+                text_anchor=sv.Point(x=50, y=100),
+                background_color=COLORS.colors[1]
+            )
+
 
         annotated_frame = sv.draw_text(
             scene=annotated_frame,
